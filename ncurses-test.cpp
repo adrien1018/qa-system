@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include <ncurses.h>
 #include <list>
 #include <string>
@@ -14,14 +16,15 @@ class Buffer {
   std::list<Byte_> buf_;
   std::list<Byte_>::iterator cur_;
   struct Event_ {
-    std::list<Byte_>::iterator pos;
+    // To undo: erase [start, cur_), insert bytes to end, place cur_ to cur
+    // (cur points into bytes, while start, end points to buf_)
+    std::list<Byte_>::iterator start, cur;
     std::list<Byte_> bytes;
-    bool del;
   } prev_; // leave it uninitialized (guarded by dirty)
   int maxheight_;
   int maxcol_;
   bool dirty_;
-  bool PrintBuffer_(WINDOW*);
+  std::list<Byte_>::iterator PrintBuffer_(WINDOW*);
  public:
   Buffer(int maxheight);
   std::pair<int, int> CurYX() const;
@@ -44,12 +47,15 @@ class Buffer {
   void Delete();
   // `Insert` inserts one byte at a time.
   void Insert(unsigned char);
+  // Automatically calls PrintBufferTruncate
+  void SetMaxHeight(int, WINDOW*);
   // Printing the buffer, undoing or clearing will clear the "dirty" state.
   void Undo();
   void Clear();
   // The window must be at least one larger than maxheight,
   // otherwise the overflow detection will not work!
   void PrintBuffer(WINDOW*);
+  void PrintBufferTruncate(WINDOW*);
   void SetCursor(WINDOW*) const;
 };
 
@@ -134,74 +140,118 @@ void Buffer::MoveRight() {
 
 void Buffer::Backspace() {
   if (cur_ == buf_.begin()) return;
-  dirty_ = true;
   auto start = std::prev(cur_);
-  while (start != buf_.begin() && 0x80 <= start->ch && start->ch < 0xc0) {
-    --start;
+  if (dirty_) {
+    bool flag = false;
+    if (start == prev_.start || cur_ == prev_.start) flag = true;
+    while (start != buf_.begin() && 0x80 <= start->ch && start->ch < 0xc0) {
+      --start;
+      if (start == prev_.start) flag = true;
+    }
+    if (flag) {
+      // start <= prev_.start <= cur_
+      prev_.bytes.splice(prev_.start, buf_, start, prev_.start);
+      buf_.erase(prev_.start, cur_);
+      prev_.start = cur_;
+    } else {
+      // prev_.start < start < cur_
+      buf_.erase(start, cur_);
+    }
+  } else {
+    while (start != buf_.begin() && 0x80 <= start->ch && start->ch < 0xc0) {
+      --start;
+    }
+    prev_.bytes.splice(prev_.bytes.begin(), buf_, start, cur_);
+    prev_.start = cur_;
+    prev_.cur = prev_.bytes.end();
+    dirty_ = true;
   }
-  prev_.bytes.clear();
-  prev_.bytes.splice(prev_.bytes.begin(), buf_, start, cur_);
-  prev_.pos = cur_;
-  prev_.del = false;
 }
 
 void Buffer::Delete() {
   if (cur_ == buf_.end()) return;
-  dirty_ = true;
   auto end = std::next(cur_);
   while (end != buf_.end() && 0x80 <= end->ch && end->ch < 0xc0) ++end;
-  prev_.bytes.clear();
-  prev_.bytes.splice(prev_.bytes.begin(), buf_, cur_, end);
-  prev_.pos = cur_ = end;
-  prev_.del = true;
+  prev_.bytes.splice(prev_.bytes.end(), buf_, cur_, end);
+  if (!dirty_) {
+    prev_.start = cur_;
+    prev_.cur = prev_.bytes.begin();
+    dirty_ = true;
+  }
+  cur_ = end;
 }
 
 void Buffer::Insert(unsigned char ch) {
-  dirty_ = true;
-  prev_.pos = buf_.emplace(cur_, ch);
-  prev_.bytes.clear();
+  if (dirty_) {
+    buf_.emplace(cur_, ch);
+  } else {
+    prev_.start = buf_.emplace(cur_, ch);
+    prev_.cur = cur_;
+    dirty_ = true;
+  }
+}
+
+void Buffer::SetMaxHeight(int maxheight, WINDOW* win) {
+  maxheight_ = maxheight;
+  PrintBufferTruncate(win);
 }
 
 void Buffer::Undo() {
   if (!dirty_) return;
   dirty_ = false;
-  if (prev_.bytes.empty()) { // insert operation; delete the byte
-    buf_.erase(prev_.pos);
-  } else { // delete operation; insert the bytes
-    auto tmp = prev_.bytes.begin();
-    buf_.splice(prev_.pos, prev_.bytes);
-    if (prev_.del) cur_ = tmp; // tmp now points to buf_
-  }
+  buf_.erase(prev_.start, cur_);
+  bool flag = prev_.bytes.empty();
+  buf_.splice(cur_, prev_.bytes);
+  if (!flag) cur_ = prev_.cur;
 }
 
 void Buffer::Clear() {
   buf_.clear();
   cur_ = buf_.begin();
+  prev_.bytes.clear();
   dirty_ = false;
 }
 
-bool Buffer::PrintBuffer_(WINDOW* win) { // return false if overflows
+std::list<Buffer::Byte_>::iterator Buffer::PrintBuffer_(WINDOW* win) {
   maxcol_ = 0;
   wclear(win);
   wmove(win, 0, 0);
   std::pair<int, int> prev = {0, 0};
-  for (auto& i : buf_) {
-    waddch(win, i.ch);
-    getyx(win, i.pos.first, i.pos.second);
-    if (i.pos.first >= maxheight_) return false;
-    if (i.pos.second > maxcol_) maxcol_ = i.pos.second;
-    i.move = i.pos != prev;
-    prev = i.pos;
+  for (auto it = buf_.begin(); it != buf_.end(); ++it) {
+    waddch(win, it->ch);
+    getyx(win, it->pos.first, it->pos.second);
+    if (it->pos.first >= maxheight_) return it;
+    if (it->pos.second > maxcol_) maxcol_ = it->pos.second;
+    it->move = it->pos != prev;
+    prev = it->pos;
   }
   SetCursor(win);
-  return true;
+  return buf_.end();
 }
 
 void Buffer::PrintBuffer(WINDOW* win) {
-  if (!PrintBuffer_(win)) { // rollback and reprint if overflow
+  if (PrintBuffer_(win) != buf_.end()) { // rollback and reprint if overflow
     Undo();
     PrintBuffer_(win);
   }
+  prev_.bytes.clear();
+  dirty_ = false;
+}
+
+void Buffer::PrintBufferTruncate(WINDOW* win) {
+  auto it = PrintBuffer_(win);
+  if (it != buf_.end()) { // rollback and reprint if overflow
+    // Truncate to whole UTF-8 character
+    while (it != buf_.begin() && 0x80 <= it->ch && it->ch < 0xc0) --it;
+    bool flag = cur_ == buf_.end();
+    for (auto i = it; i != buf_.end() && !flag; i++) {
+      if (cur_ == i) flag = true;
+    }
+    buf_.erase(it, buf_.end());
+    if (flag) cur_ = buf_.end();
+    PrintBuffer_(win);
+  }
+  prev_.bytes.clear();
   dirty_ = false;
 }
 
@@ -211,6 +261,12 @@ void Buffer::SetCursor(WINDOW* win) const {
 }
 
 static inline int Scroll(int old, int cur, int tot, int sz) {
+  if (sz == 1) return cur;
+  if (sz == 2) {
+    if (cur >= old && cur < old + sz) return old;
+    if (cur >= old + sz) return cur - 1;
+    return cur;
+  }
   if (cur > old && cur < old + sz - 1) return old;
   if (cur == old && cur == 0) return old;
   if (cur == old + sz - 1 && cur == tot - 1) return old;
@@ -232,7 +288,7 @@ class Textbox {
   // multiline only affects key processing
   bool writable_, multiline_;
   int currow_, curcol_;
-  void Redraw_(bool clr = true);
+  void Redraw_(bool clr = true, bool truncate = false);
   void Refresh_(bool redraw = false);
  public:
   Textbox(int posy, int posx, int height, int width, bool writable = true,
@@ -244,13 +300,18 @@ class Textbox {
   void Refresh(bool redraw = true);
   void SetWritable(bool);
   void SetMultiline(bool);
+  // To move / resize the window correctly, one may need to clear / refresh the
+  // background screens (such as stdscr) beforehand
   void MoveWindow(int y, int x);
   void ResizeWindow(int height, int width);
-  // Shrinking the buffer may truncate the content
+  // Shrinking the buffer may truncate the content; if the size is smaller than
+  // the window size, the window size will be shrinked to fit
   void ResizeBuffer(int maxheight, int maxwidth);
   void Clear();
   void SetText(const std::string&);
-  int ProcessKey(int, bool = true);
+  // To make non-ASCII code overflow detection work, one need to call ProcessKey
+  // with input_redraw = false on all but the last byte
+  int ProcessKey(int, bool input_redraw = true);
 };
 
 Textbox::Textbox(int posy, int posx, int height, int width, bool writable,
@@ -278,9 +339,13 @@ std::string Textbox::GetText() const {
   return buf_.ToString();
 }
 
-void Textbox::Redraw_(bool clr) {
+void Textbox::Redraw_(bool clr, bool truncate) {
   if (clr) wclear(pad_);
-  buf_.PrintBuffer(pad_);
+  if (truncate) {
+    buf_.PrintBuffer(pad_);
+  } else {
+    buf_.PrintBufferTruncate(pad_);
+  }
   Refresh_();
 }
 
@@ -319,20 +384,18 @@ void Textbox::MoveWindow(int y, int x) {
 void Textbox::ResizeWindow(int height, int width) {
   height_ = height;
   width_ = width;
-  Refresh_();
+  Refresh_(true);
 }
 
 void Textbox::ResizeBuffer(int maxheight, int maxwidth) {
-  if (maxheight < height_) maxheight = height_;
-  if (maxwidth < width_) maxwidth = width_;
+  if (maxheight < height_) height_ = maxheight;
+  if (maxwidth < width_) width_ = maxwidth;
   maxheight_ = maxheight;
   maxwidth_ = maxwidth;
-  std::string str = GetText();
-  buf_ = Buffer(maxheight);
-  for (auto i : str) buf_.Insert(i);
   delwin(pad_);
   pad_ = newpad(maxheight_ + 1, maxwidth_);
-  Redraw_(false);
+  buf_.SetMaxHeight(maxheight_, pad_);
+  Refresh_(true);
 }
 
 void Textbox::Clear() {
@@ -344,7 +407,7 @@ void Textbox::Clear() {
 void Textbox::SetText(const std::string& str) {
   buf_.Clear();
   for (auto i : str) buf_.Insert(i);
-  Redraw_();
+  Redraw_(true, true);
 }
 
 int Textbox::ProcessKey(int ch, bool input_redraw) {
@@ -415,18 +478,15 @@ int main() {
             "01234567890123456789012345678901234567890123456789");
   doupdate();
   sleep(1);
+  erase(); wnoutrefresh(stdscr);
   a.MoveWindow(3, 3);
-  redrawwin(stdscr);
-  doupdate();
-  sleep(1);
+  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
   a.ResizeWindow(2, 59);
-  redrawwin(stdscr);
-  doupdate();
-  sleep(1);
+  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
   a.ResizeBuffer(4, 59);
   a.ResizeWindow(4, 59);
-  redrawwin(stdscr);
-  doupdate();
+  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
+  //erase(); wnoutrefresh(stdscr); a.Refresh(false); doupdate(); sleep(1);
   for (int i = 0; i < 200; i++) {
     a.ProcessKey(getch(), true);
     doupdate();
