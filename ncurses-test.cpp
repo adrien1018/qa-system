@@ -36,6 +36,8 @@ class Buffer {
   void MoveDown(int = 1);
   void MoveLeft();
   void MoveRight();
+  void MoveLineStart();
+  void MoveLineEnd();
   // Calling input functions will make the buffer into "dirty" state, in which
   // no futher cursor movements can be made (since the position of the
   // characters hasn't updated), and the `CurYX`, `Lines` functions will return
@@ -136,6 +138,19 @@ void Buffer::MoveRight() {
   if (cur_ == buf_.end()) return;
   while (!cur_->move) ++cur_;
   ++cur_;
+}
+
+void Buffer::MoveLineStart() {
+  if (dirty_) return;
+  if (cur_ == buf_.begin()) return;
+  auto prv = std::prev(cur_);
+  while (prv != buf_.begin() && prv->ch != '\n') cur_ = prv--;
+  if (prv->ch != '\n') cur_ = buf_.begin();
+}
+
+void Buffer::MoveLineEnd() {
+  if (dirty_) return;
+  while (cur_ != buf_.end() && cur_->ch != '\n') ++cur_;
 }
 
 void Buffer::Backspace() {
@@ -240,7 +255,7 @@ void Buffer::PrintBuffer(WINDOW* win) {
 
 void Buffer::PrintBufferTruncate(WINDOW* win) {
   auto it = PrintBuffer_(win);
-  if (it != buf_.end()) { // rollback and reprint if overflow
+  if (it != buf_.end()) { // truncate if overflow
     // Truncate to whole UTF-8 character
     while (it != buf_.begin() && 0x80 <= it->ch && it->ch < 0xc0) --it;
     bool flag = cur_ == buf_.end();
@@ -419,6 +434,8 @@ int Textbox::ProcessKey(int ch, bool input_redraw) {
       case KEY_RIGHT: buf_.MoveRight(); Refresh_(); break;
       case KEY_PPAGE: buf_.MoveUp(std::max(1, height_ - 1)); Refresh_(); break;
       case KEY_NPAGE: buf_.MoveDown(std::max(1, height_ - 1)); Refresh_(); break;
+      case KEY_HOME: buf_.MoveLineStart(); Refresh_(); break;
+      case KEY_END: buf_.MoveLineEnd(); Refresh_(); break;
       case KEY_BACKSPACE: buf_.Backspace(); Redraw_(); break;
       case KEY_DC: buf_.Delete(); Redraw_(); break;
       default: {
@@ -457,6 +474,14 @@ int Textbox::ProcessKey(int ch, bool input_redraw) {
         currow_ = std::min(buf_.Lines() - height_, currow_ + (height_ - 1));
         Refresh(pr != currow_);
         break;
+      case KEY_HOME:
+        curcol_ = 0;
+        Refresh(pc != curcol_);
+        break;
+      case KEY_END:
+        curcol_ = std::max(0, buf_.Columns() - width_);
+        Refresh(pc != curcol_);
+        break;
       default: return ch;
     }
   }
@@ -486,7 +511,6 @@ int main() {
   a.ResizeBuffer(4, 59);
   a.ResizeWindow(4, 59);
   doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
-  //erase(); wnoutrefresh(stdscr); a.Refresh(false); doupdate(); sleep(1);
   for (int i = 0; i < 200; i++) {
     a.ProcessKey(getch(), true);
     doupdate();
