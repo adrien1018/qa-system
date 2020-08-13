@@ -606,6 +606,75 @@ int Menu::ProcessKey(int ch) {
   return 0;
 }
 
+class CheckBox {
+  WINDOW *win_;
+  int toggle_, posy_, posx_;
+  char on_, off_;
+  bool selected_;
+ public:
+  // Print directly on window; if nullptr, stdscr is used
+  // otherwise, a new window is created
+  CheckBox(int posy, int posx, int toggle = '\n', WINDOW* = nullptr,
+           char on = 'v', char off = ' ');
+  bool GetValue() const;
+  void Refresh();
+  void Toggle();
+  void MoveWindow(int y, int x);
+  void SetChar(char on, char off = ' ');
+  void SetToggle(int);
+  int ProcessKey(int);
+};
+
+CheckBox::CheckBox(int posy, int posx, int toggle, WINDOW* win, char on,
+                   char off)
+    : win_(win ? win : stdscr),
+      toggle_(toggle),
+      posy_(posy),
+      posx_(posx),
+      on_(on),
+      off_(off),
+      selected_(false) {
+  Refresh();
+}
+
+bool CheckBox::GetValue() const {
+  return selected_;
+}
+
+void CheckBox::Refresh() {
+  mvwprintw(win_, posy_, posx_, "[%c]", selected_ ? on_ : off_);
+  wnoutrefresh(win_);
+}
+
+void CheckBox::Toggle() {
+  selected_ ^= true;
+  Refresh();
+}
+
+void CheckBox::SetChar(char on, char off) {
+  on_ = on;
+  off_ = off;
+}
+
+void CheckBox::SetToggle(int ch) {
+  toggle_ = ch;
+}
+
+void CheckBox::MoveWindow(int y, int x) {
+  mvwprintw(win_, posy_, posx_, "   ");
+  posy_ = y;
+  posx_ = x;
+  wnoutrefresh(win_);
+}
+
+int CheckBox::ProcessKey(int ch) {
+  if (ch == toggle_) {
+    Toggle();
+    return 0;
+  }
+  return ch;
+}
+
 #include <iostream>
 #include <unistd.h>
 
@@ -615,16 +684,12 @@ int main() {
   keypad(stdscr, true);
   wnoutrefresh(stdscr);
   noecho();
-  Menu a({"aa", "ab", "bbb", "bc", "cc", "cf"}, 2, 2, 3, 10);
+  CheckBox a(4, 4, ' ');
   doupdate();
   for (int i = 0; i < 10; i++) {
     a.ProcessKey(getch());
     doupdate();
   }
-  sleep(1);
-  a.MoveWindow(3, 3);
-  a.ResizeWindow(4, 10);
-  doupdate();
   sleep(1);
   int res = a.GetValue();
   endwin();
