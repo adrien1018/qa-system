@@ -310,7 +310,7 @@ class Textbox {
           bool multiline = true, int maxheight = 2000, int maxwidth = -1);
   Textbox& operator=(const Textbox&) = delete;
   ~Textbox();
-  std::string GetText() const;
+  std::string GetValue() const;
   void Redraw() { Redraw_(); }
   void Refresh(bool redraw = true);
   void SetWritable(bool);
@@ -350,7 +350,7 @@ Textbox::~Textbox() {
   delwin(pad_);
 }
 
-std::string Textbox::GetText() const {
+std::string Textbox::GetValue() const {
   return buf_.ToString();
 }
 
@@ -488,6 +488,124 @@ int Textbox::ProcessKey(int ch, bool input_redraw) {
   return 0;
 }
 
+#include <menu.h>
+#include <vector>
+
+class Menu {
+  WINDOW *win_, *sub_;
+  MENU* menu_;
+  std::vector<ITEM*> items_;
+  std::vector<std::string> choices_;
+  int posy_, posx_;
+  int height_, width_;
+  int suby_, subx_;
+  int subheight_, subwidth_;
+  void Build_();
+  void Destroy_();
+ public:
+  Menu(const std::vector<std::string>&, int posy, int posx, int height,
+       int width, int suby = 0, int subx = 0, int subheight = -1,
+       int subwidth = -1);
+  ~Menu();
+  WINDOW* GetWin();
+  int GetValue() const;
+  void Refresh();
+  void MoveWindow(int y, int x);
+  void ResizeWindow(int height, int width, int suby = -1, int subx = -1,
+                    int subheight = -1, int subwidth = -1);
+  int ProcessKey(int);
+};
+
+void Menu::Build_() {
+  for (auto& i : choices_) items_.push_back(new_item(i.c_str(), ""));
+  menu_ = new_menu(items_.data());
+  win_ = newwin(height_, width_, posy_, posx_);
+  sub_ = derwin(win_, subheight_, subwidth_, suby_, subx_);
+  set_menu_win(menu_, win_);
+  set_menu_sub(menu_, sub_);
+  set_menu_mark(menu_, "");
+  set_menu_format(menu_, subheight_, 1);
+  post_menu(menu_);
+}
+
+void Menu::Destroy_() {
+  unpost_menu(menu_);
+  free_menu(menu_);
+  for (auto& i : items_) free_item(i);
+  items_.clear();
+  delwin(sub_);
+  wclear(win_);
+  wnoutrefresh(win_);
+  delwin(win_);
+}
+
+Menu::Menu(const std::vector<std::string>& choices, int posy, int posx,
+           int height, int width, int suby, int subx, int subheight,
+           int subwidth)
+    : choices_(choices),
+      posy_(posy),
+      posx_(posx),
+      height_(height),
+      width_(width),
+      suby_(suby),
+      subx_(subx),
+      subheight_(subheight <= 0 ? height - suby_ : subheight),
+      subwidth_(subwidth <= 0 ? width - subx_ : subwidth) {
+  Build_();
+  Refresh();
+}
+
+Menu::~Menu() {
+  Destroy_();
+}
+
+WINDOW* Menu::GetWin() {
+  return win_;
+}
+
+int Menu::GetValue() const {
+  return item_index(current_item(menu_));
+}
+
+void Menu::Refresh() {
+  wnoutrefresh(win_);
+}
+
+void Menu::MoveWindow(int y, int x) {
+  int item = GetValue();
+  Destroy_();
+  posy_ = y;
+  posx_ = x;
+  Build_();
+  set_current_item(menu_, items_[item]);
+  Refresh();
+}
+
+void Menu::ResizeWindow(int height, int width, int suby, int subx, int subheight, int subwidth) {
+  int item = GetValue();
+  Destroy_();
+  height_ = height;
+  width_ = width;
+  if (suby >= 0) suby_ = suby;
+  if (subx >= 0) subx_ = subx;
+  subheight_ = subheight <= 0 ? height_ - suby_ : subheight;
+  subwidth_ = subwidth <= 0 ? width_ - subx_ : subwidth;
+  Build_();
+  set_current_item(menu_, items_[item]);
+  Refresh();
+}
+
+int Menu::ProcessKey(int ch) {
+  switch (ch) {
+    case KEY_DOWN: menu_driver(menu_, REQ_DOWN_ITEM); Refresh(); break;
+    case KEY_UP: menu_driver(menu_, REQ_UP_ITEM); Refresh(); break;
+    case KEY_NPAGE: menu_driver(menu_, REQ_SCR_DPAGE); Refresh(); break;
+    case KEY_PPAGE: menu_driver(menu_, REQ_SCR_UPAGE); Refresh(); break;
+    default: return ch;
+  }
+  return 0;
+}
+
 #include <iostream>
 #include <unistd.h>
 
@@ -497,24 +615,18 @@ int main() {
   keypad(stdscr, true);
   wnoutrefresh(stdscr);
   noecho();
-  Textbox a(2, 2, 3, 60, true, true, 3, 60);
-  a.SetText("012345678901234567890123456789012345678901234567890123456789"
-            "012345678901234567890123456789012345678901234567890123456789"
-            "01234567890123456789012345678901234567890123456789");
+  Menu a({"aa", "ab", "bbb", "bc", "cc", "cf"}, 2, 2, 3, 10);
   doupdate();
-  sleep(1);
-  erase(); wnoutrefresh(stdscr);
-  a.MoveWindow(3, 3);
-  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
-  a.ResizeWindow(2, 59);
-  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
-  a.ResizeBuffer(4, 59);
-  a.ResizeWindow(4, 59);
-  doupdate(); sleep(1); erase(); wnoutrefresh(stdscr);
-  for (int i = 0; i < 200; i++) {
-    a.ProcessKey(getch(), true);
+  for (int i = 0; i < 10; i++) {
+    a.ProcessKey(getch());
     doupdate();
   }
+  sleep(1);
+  a.MoveWindow(3, 3);
+  a.ResizeWindow(4, 10);
+  doupdate();
+  sleep(1);
+  int res = a.GetValue();
   endwin();
-  std::cout << a.GetText();
+  std::cout << res << std::endl;
 }
