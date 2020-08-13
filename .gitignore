@@ -1,3 +1,5 @@
 *
-!ncurses-test.cpp
+!ncurses-widget.cpp
+!ncurses-widget.h
+!main.cpp
 !.gitignore
