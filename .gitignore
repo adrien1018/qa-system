@@ -1,5 +1,5 @@
 *
-!ncurses-widget.cpp
-!ncurses-widget.h
-!main.cpp
+!*.cpp
+!*.h
 !.gitignore
+!Makefile

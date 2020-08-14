@@ -260,6 +260,10 @@ Textbox::~Textbox() {
   delwin(pad_);
 }
 
+WINDOW* Textbox::GetWin() {
+  return pad_;
+}
+
 std::string Textbox::GetValue() const {
   return buf_.ToString();
 }
@@ -402,6 +406,7 @@ int Textbox::ProcessKey(int ch, bool input_redraw) {
 
 void Menu::Build_() {
   for (auto& i : choices_) items_.push_back(new_item(i.c_str(), ""));
+  items_.push_back(nullptr);
   menu_ = new_menu(items_.data());
   win_ = newwin(height_, width_, posy_, posx_);
   sub_ = derwin(win_, subheight_, subwidth_, suby_, subx_);
@@ -415,6 +420,7 @@ void Menu::Build_() {
 void Menu::Destroy_() {
   unpost_menu(menu_);
   free_menu(menu_);
+  items_.pop_back();
   for (auto& i : items_) free_item(i);
   items_.clear();
   delwin(sub_);
@@ -448,6 +454,7 @@ WINDOW* Menu::GetWin() {
 }
 
 int Menu::GetValue() const {
+  if (choices_.empty()) return -1;
   return item_index(current_item(menu_));
 }
 
@@ -461,7 +468,7 @@ void Menu::MoveWindow(int y, int x) {
   posy_ = y;
   posx_ = x;
   Build_();
-  set_current_item(menu_, items_[item]);
+  if (choices_.size()) set_current_item(menu_, items_[item]);
   Refresh();
 }
 
@@ -475,7 +482,7 @@ void Menu::ResizeWindow(int height, int width, int suby, int subx, int subheight
   subheight_ = subheight <= 0 ? height_ - suby_ : subheight;
   subwidth_ = subwidth <= 0 ? width_ - subx_ : subwidth;
   Build_();
-  set_current_item(menu_, items_[item]);
+  if (choices_.size()) set_current_item(menu_, items_[item]);
   Refresh();
 }
 
@@ -494,7 +501,7 @@ int Menu::ProcessKey(int ch) {
 
 CheckBox::CheckBox(int posy, int posx, int toggle, WINDOW* win, char on,
                    char off)
-    : win_(win ? win : stdscr),
+    : win_(win),
       toggle_(toggle),
       posy_(posy),
       posx_(posx),
@@ -504,11 +511,16 @@ CheckBox::CheckBox(int posy, int posx, int toggle, WINDOW* win, char on,
   Refresh();
 }
 
+void CheckBox::SetWindow(WINDOW* win) {
+  win_ = win;
+}
+
 bool CheckBox::GetValue() const {
   return selected_;
 }
 
 void CheckBox::Refresh() {
+  if (!win_) return;
   mvwprintw(win_, posy_, posx_, "[%c]", selected_ ? on_ : off_);
   wnoutrefresh(win_);
 }
@@ -528,10 +540,10 @@ void CheckBox::SetToggle(int ch) {
 }
 
 void CheckBox::MoveWindow(int y, int x) {
-  mvwprintw(win_, posy_, posx_, "   ");
   posy_ = y;
   posx_ = x;
-  wnoutrefresh(win_);
+  if (!win_) return;
+  Refresh();
 }
 
 int CheckBox::ProcessKey(int ch) {
@@ -540,4 +552,78 @@ int CheckBox::ProcessKey(int ch) {
     return 0;
   }
   return ch;
+}
+
+// ButtonGroup
+
+ButtonGroup::ButtonGroup(const std::vector<Button>& buttons, WINDOW* win)
+    : win_(win), buttons_(buttons), selected_(0) {
+  for (auto& i : buttons_) {
+    if (i.left >= (int)buttons.size()) i.left = -1;
+    if (i.right >= (int)buttons.size()) i.right = -1;
+    if (i.up >= (int)buttons.size()) i.up = -1;
+    if (i.down >= (int)buttons.size()) i.down = -1;
+  }
+  Refresh();
+}
+
+void ButtonGroup::SetWindow(WINDOW* win) {
+  win_ = win;
+}
+
+void ButtonGroup::Refresh() {
+  if (!win_) return;
+  for (int i = 0; i < (int)buttons_.size(); i++) {
+    auto& b = buttons_[i];
+    if (i == selected_) {
+      wmove(win_, b.y, b.x);
+      waddch(win_, '[');
+      wattron(win_, A_STANDOUT);
+      waddstr(win_, b.str.c_str());
+      wattroff(win_, A_STANDOUT);
+      waddch(win_, ']');
+    } else {
+      mvwprintw(win_, b.y, b.x, "[%s]", b.str.c_str());
+    }
+  }
+  wnoutrefresh(win_);
+}
+
+void ButtonGroup::ResetButtons(const std::vector<Button>& buttons) {
+  buttons_ = buttons;
+  for (auto& i : buttons_) {
+    if (i.left >= (int)buttons.size()) i.left = -1;
+    if (i.right >= (int)buttons.size()) i.right = -1;
+    if (i.up >= (int)buttons.size()) i.up = -1;
+    if (i.down >= (int)buttons.size()) i.down = -1;
+  }
+  Refresh();
+}
+
+void ButtonGroup::Unselect() {
+  selected_ = -1;
+}
+
+void ButtonGroup::Select(int n) {
+  selected_ = n;
+}
+
+int ButtonGroup::GetValue() const {
+  return selected_;
+}
+
+int ButtonGroup::ProcessKey(int ch) {
+  if (selected_ == -1) return ch;
+  int next;
+  switch (ch) {
+    case KEY_UP: next = buttons_[selected_].up; break;
+    case KEY_DOWN: next = buttons_[selected_].down; break;
+    case KEY_LEFT: next = buttons_[selected_].left; break;
+    case KEY_RIGHT: next = buttons_[selected_].right; break;
+    default: return ch;
+  }
+  if (next < 0) return ch;
+  selected_ = next;
+  Refresh();
+  return 0;
 }

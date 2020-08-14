@@ -29,6 +29,7 @@ class Buffer {
   std::list<Byte_>::iterator PrintBuffer_(WINDOW*);
  public:
   Buffer(int maxheight);
+  size_t size() const { return buf_.size(); }
   std::pair<int, int> CurYX() const;
   int Lines() const;
   int Columns() const;
@@ -77,9 +78,12 @@ class Textbox {
  public:
   Textbox(int posy, int posx, int height, int width, bool writable = true,
           bool multiline = true, int maxheight = 2000, int maxwidth = -1);
-  Textbox& operator=(const Textbox&) = delete;
   ~Textbox();
+  Textbox(const Textbox&) = delete;
+  Textbox& operator=(const Textbox&) = delete;
+  WINDOW* GetWin();
   std::string GetValue() const;
+  size_t size() const { return buf_.size(); }
   void Redraw() { Redraw_(); }
   void Refresh(bool redraw = true);
   void SetWritable(bool);
@@ -114,25 +118,30 @@ class Menu {
        int width, int suby = 0, int subx = 0, int subheight = -1,
        int subwidth = -1);
   ~Menu();
+  Menu(const Menu&) = delete;
+  Menu& operator=(const Menu&) = delete;
   WINDOW* GetWin();
   int GetValue() const;
   void Refresh();
   void MoveWindow(int y, int x);
   void ResizeWindow(int height, int width, int suby = -1, int subx = -1,
                     int subheight = -1, int subwidth = -1);
+  void ResizeSubwin(int suby, int subx = -1, int subheight = -1,
+                    int subwidth = -1);
   int ProcessKey(int);
 };
 
 class CheckBox {
-  WINDOW *win_;
+  WINDOW* win_;
   int toggle_, posy_, posx_;
   char on_, off_;
   bool selected_;
  public:
-  // Print directly on window; if nullptr, stdscr is used
-  // otherwise, a new window is created
+  // Print directly on window; if nullptr, nothing is displayed
   CheckBox(int posy, int posx, int toggle = '\n', WINDOW* = nullptr,
            char on = 'v', char off = ' ');
+  // Note: this function does not refresh
+  void SetWindow(WINDOW*);
   bool GetValue() const;
   void Refresh();
   void Toggle();
@@ -142,5 +151,28 @@ class CheckBox {
   int ProcessKey(int);
 };
 
+struct Button {
+  std::string str;
+  int y, x;
+  int left, right, up, down;
+};
+
+class ButtonGroup {
+  WINDOW* win_;
+  std::vector<Button> buttons_;
+  int selected_;
+ public:
+  // Print directly on window; if nullptr, nothing is displayed
+  ButtonGroup(const std::vector<Button>&, WINDOW* = nullptr);
+  // Note: this function does not refresh
+  void SetWindow(WINDOW*);
+  void Refresh();
+  // Must clear the old buttons manually
+  void ResetButtons(const std::vector<Button>&);
+  void Unselect();
+  void Select(int);
+  int GetValue() const;
+  int ProcessKey(int);
+};
 
 #endif // NCURSES_WIDGET_H_
