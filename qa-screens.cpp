@@ -61,22 +61,6 @@ void ScreenWithTitle::RefreshTitle_() {
   SetCursor();
 }
 
-void MenuScreen::Resize_() {
-  clear();
-  mvaddstr(LINES - 2, 1, message_.c_str());
-  RefreshTitle_();
-  menu_.ResizeWindow(LINES - 4, COLS - 2);
-  WINDOW* win = menu_.GetWin();
-  wclear(win);
-  mvwaddstr(win, 0, 0, header_.c_str()); // just for getting height
-  int y, x; // x not used
-  getyx(win, y, x);
-  menu_.ResizeWindow(LINES - 4, COLS - 2, y + 1);
-  win = menu_.GetWin();
-  mvwaddstr(win, 0, 0, header_.c_str());
-  wnoutrefresh(win);
-}
-
 MenuScreen::MenuScreen(const std::vector<std::string>& choices,
                        const std::string& header)
     : menu_(choices, 2, 1, LINES - 4, COLS - 2),
@@ -94,21 +78,6 @@ void MenuScreen::SetMessage(const std::string& message) {
 int MenuScreen::GetValue() const {
   if (leave_) return -1;
   return menu_.GetValue();
-}
-
-bool MenuScreen::ProcessKey(int ch) {
-  leave_ = false;
-  if (ch == '\n') return true;
-  if (ch == 27) {
-    leave_ = true;
-    return true;
-  }
-  if (ch == KEY_RESIZE) {
-    Resize_();
-  } else {
-    ch = menu_.ProcessKey(ch);
-  }
-  return false;
 }
 
 void PromptScreen::Resize_() {

@@ -126,8 +126,24 @@ class Menu {
   void MoveWindow(int y, int x);
   void ResizeWindow(int height, int width, int suby = -1, int subx = -1,
                     int subheight = -1, int subwidth = -1);
-  void ResizeSubwin(int suby, int subx = -1, int subheight = -1,
-                    int subwidth = -1);
+  template <class Func>
+  void ResizeWindowCallback(Func&& callback, int height, int width,
+                            int suby = -1, int subx = -1, int subheight = -1,
+                            int subwidth = -1) {
+    int item = GetValue();
+    Destroy_();
+    height_ = height;
+    width_ = width;
+    if (suby >= 0) suby_ = suby;
+    if (subx >= 0) subx_ = subx;
+    subheight_ = subheight <= 0 ? height_ - suby_ : subheight;
+    subwidth_ = subwidth <= 0 ? width_ - subx_ : subwidth;
+    callback(choices_, subheight_, subwidth_);
+    Build_();
+    item = std::min(item, (int)choices_.size() - 1);
+    if (choices_.size()) set_current_item(menu_, items_[item]);
+    Refresh();
+  }
   int ProcessKey(int);
 };
 

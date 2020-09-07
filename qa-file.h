@@ -38,7 +38,7 @@ class TestResult {
   time_t finish;
   double elapsed;
   int score, fullmark;
-  std::string GetMenuText() const;
+  std::string GetMenuText(int width) const;
   std::string GetSummary(bool full) const;
   std::string GetReview(const QuestionSet&, bool full) const;
 };

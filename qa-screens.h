@@ -2,6 +2,7 @@
 #define QA_SCREENS_H_
 
 #include <optional>
+#include <functional>
 #include "ncurses-widget.h"
 
 // These classes handle screen resizing and termination.
@@ -37,16 +38,51 @@ class ScreenWithTitle {
 };
 
 class MenuScreen : public ScreenWithTitle {
+  struct DefaultCallback {
+    void operator()(std::string& /*header*/, std::vector<std::string>& /*choices*/,
+                    int /*height*/, int /*width*/) {}
+  };
   Menu menu_;
   std::string header_;
   std::string message_;
   bool leave_;
-  void Resize_();
+  template <class Func = DefaultCallback>
+  void Resize_(Func&& callback = DefaultCallback()) {
+    clear();
+    mvaddstr(LINES - 2, 1, message_.c_str());
+    RefreshTitle_();
+    menu_.ResizeWindow(LINES - 4, COLS - 2);
+    WINDOW* win = menu_.GetWin();
+    wclear(win);
+    mvwaddstr(win, 0, 0, header_.c_str()); // just for getting height
+    int y, __attribute__((unused)) x;
+    getyx(win, y, x);
+    using namespace std::placeholders;
+    menu_.ResizeWindowCallback(std::bind(callback, std::ref(header_), _1, _2, _3),
+                               LINES - 4, COLS - 2, y + 1);
+    win = menu_.GetWin();
+    mvwaddstr(win, 0, 0, header_.c_str());
+    wnoutrefresh(win);
+  }
  public:
   MenuScreen(const std::vector<std::string>&, const std::string& header = "");
   void SetMessage(const std::string&);
   int GetValue() const;
-  bool ProcessKey(int);
+  template <class Func = DefaultCallback>
+  bool ProcessKey(int ch, Func&& callback = DefaultCallback()) {
+    leave_ = false;
+    if (ch == '\n') return true;
+    if (ch == 27) {
+      leave_ = true;
+      return true;
+    }
+    if (ch == KEY_RESIZE) {
+      Resize_(callback);
+    } else {
+      ch = menu_.ProcessKey(ch);
+    }
+    return false;
+  }
 };
 
 // TODO: Add input buffer for UTF-8

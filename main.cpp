@@ -87,16 +87,28 @@ QAScreen ShowOpenQuestionScreen() {
 }
 
 QAScreen ShowHistoryScreen() {
+  const int kMargin = 2;
   std::vector<std::string> hist;
-  for (auto& i : history) hist.push_back(i.GetMenuText());
-  MenuScreen scr(hist,
-      "Select an entry to view detailed results or take the test again.\n"
-      "Press <ESC> to leave.\n\n" +
-      kHistoryHeader);
+  for (auto& i : history) hist.push_back(i.GetMenuText(COLS-kMargin));
+  auto GenHeader = [&](int width) {
+    return "Select an entry to view detailed results or take the test again.\n"
+           "Press <ESC> to leave.\n\nFilename" +
+           std::string(width - kHistoryHeader.size() - 8, ' ') + kHistoryHeader;
+  };
+  MenuScreen scr(hist, GenHeader(COLS - kMargin));
   SetTitle(&scr);
   doupdate();
   while (true) {
-    while (!scr.ProcessKey(getch())) doupdate();
+    while (true) {
+      bool ret =
+          scr.ProcessKey(getch(), [&](auto& header, auto& hist, int, int w) {
+            hist.clear();
+            for (auto& i : history) hist.push_back(i.GetMenuText(w));
+            header = GenHeader(w);
+          });
+      if (ret) break;
+      doupdate();
+    }
     int val = scr.GetValue();
     if (val == -1) {
       question_set.questions.clear();

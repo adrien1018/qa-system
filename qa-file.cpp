@@ -102,12 +102,13 @@ QuestionSet ReadCSV(const std::string& filename) {
 }
 
 const std::string kHistoryHeader =
-    "Filename                    Score  Tot.Ques.  Elapsed(s)     Date/Time";
-   //0    |    ^10  |    ^20  |    ^30  |    ^40  |    ^50  |    ^60  |   ^70
-   ///home/a/Meow.csv               88         99       2.555 2020-08-14 01:02:03
+    "Score  Tot.Ques.  Elapsed(s)     Date/Time      ";
+  // 0    |    ^10  |    ^20  |    ^30  |    ^40  |  v48
+  //    88         99       2.555 2020-08-14 01:02:03
 
-std::string TestResult::GetMenuText() const {
-  size_t num = PrefixFit(file, 28);
+std::string TestResult::GetMenuText(int tot_width) const {
+  int name_width = tot_width - kHistoryHeader.size();
+  size_t num = PrefixFit(file, name_width);
   if (num < file.size()) {
     while (num && 0x80 <= (unsigned char)file[num] &&
            (unsigned char)file[num] < 0xc0) {
@@ -120,7 +121,7 @@ std::string TestResult::GetMenuText() const {
   strftime(datebuf, sizeof(datebuf), "%Y-%m-%d %H:%M:%S", localtime(&finish));
   snprintf(buf, sizeof(buf), "%5d%11d%12.3lf%20s", score, (int)ord.size(),
            elapsed, datebuf);
-  return display_file + std::string(28 - width, ' ') + buf;
+  return display_file + std::string(name_width - width, ' ') + buf;
 }
 
 std::string TestResult::GetSummary(bool full) const {
